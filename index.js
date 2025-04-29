@@ -50,8 +50,8 @@ console.log('Configurando transporte de correo...');
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
+    user: 'servicio@orasystem.cl',
+    pass: 'bchj bsap luhz ynav'
   },
   debug: true // Activar modo debug de nodemailer
 });
@@ -265,8 +265,8 @@ app.post('/api/formulario', async (req, res) => {
     // Configuración del correo
     console.log('Preparando opciones de correo...');
     const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: process.env.EMAIL_TO,
+      from: 'servicio@orasystem.cl',
+      to: 'servicio@orasystem.cl',
       subject: 'Nueva Solicitud de Consultoría - Formulario Web',
       html: htmlTemplate
     };
