@@ -7,6 +7,15 @@ const app = express();
 // Puerto para Vercel (usa process.env.PORT si está disponible, de lo contrario usa 3001)
 const PORT = process.env.PORT || 3001;
 
+// Middleware para registrar la IP del cliente en cada solicitud
+app.use((req, res, next) => {
+  const clientIP = req.headers['x-forwarded-for'] || 
+                  req.headers['x-real-ip'] || 
+                  req.connection.remoteAddress;
+  console.log(`Solicitud recibida desde IP: ${clientIP}`);
+  next();
+});
+
 // Debug de variables de entorno (sin mostrar la contraseña completa)
 console.log('=== CONFIGURACIÓN DE ENTORNO ===');
 console.log(`Puerto: ${PORT}`);
@@ -338,7 +347,31 @@ app.get('/registros', (req, res) => {
 // Ruta para comprobar que el servidor está funcionando
 app.get('/', (req, res) => {
   console.log('📥 Recibida petición GET a /');
-  res.send('API para formulario de contacto funcionando correctamente');
+  
+  // Obtener la IP del cliente
+  const clientIP = req.headers['x-forwarded-for'] || 
+                  req.headers['x-real-ip'] || 
+                  req.connection.remoteAddress;
+  
+  // Crear un objeto con información de diagnóstico
+  const diagnosticInfo = {
+    message: 'API para formulario de contacto funcionando correctamente',
+    timestamp: new Date().toISOString(),
+    clientIP: clientIP,
+    headers: req.headers,
+    nodeVersion: process.version,
+    envVars: {
+      PORT: PORT,
+      NODE_ENV: process.env.NODE_ENV || 'not set'
+    }
+  };
+  
+  // Mostrar información en los logs del servidor
+  console.log('Información de diagnóstico:');
+  console.log(JSON.stringify(diagnosticInfo, null, 2));
+  
+  // Enviar respuesta con la información de diagnóstico
+  res.json(diagnosticInfo);
 });
 
 // Iniciar el servidor
