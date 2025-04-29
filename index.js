@@ -19,9 +19,9 @@ app.use((req, res, next) => {
 // Debug de variables de entorno (sin mostrar la contraseña completa)
 console.log('=== CONFIGURACIÓN DE ENTORNO ===');
 console.log(`Puerto: ${PORT}`);
-console.log(`EMAIL_USER: ${'ithanvera423@gmail.com'}`);
+console.log(`EMAIL_USER: ${process.env.EMAIL_USER}`);
 console.log(`EMAIL_PASS configurado: Sí (valor oculto)`);
-console.log(`EMAIL_TO: ${'ivera@orasystem.cl'}`);
+console.log(`EMAIL_TO: ${process.env.EMAIL_TO}`);
 console.log(`DB_SERVER: ${'seguridad.database.windows.net'}`);
 console.log(`DB_NAME: ${'SeguridadBD'}`);
 console.log('===============================');
@@ -34,10 +34,10 @@ app.use(express.static('.')); // Sirve archivos estáticos desde la raíz
 
 // Configuración de la base de datos SQL Server
 const dbConfig = {
-  server: process.env.DB_SERVER || 'seguridad.database.windows.net',
-  database: process.env.DB_NAME || 'SeguridadBD',
-  user: process.env.DB_USER || 'orasystem',
-  password: process.env.DB_PASSWORD || 'admin123.',
+  server: 'seguridad.database.windows.net',
+  database: 'SeguridadBD',
+  user: 'orasystem',
+  password: 'admin123.',
   options: {
     encrypt: true,
     trustServerCertificate: false,
@@ -50,8 +50,8 @@ console.log('Configurando transporte de correo...');
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: process.env.EMAIL_USER || 'contacto@orasystem.cl',
-    pass: process.env.EMAIL_PASS || ''
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
   },
   debug: true // Activar modo debug de nodemailer
 });
@@ -265,8 +265,8 @@ app.post('/api/formulario', async (req, res) => {
     // Configuración del correo
     console.log('Preparando opciones de correo...');
     const mailOptions = {
-      from: process.env.EMAIL_USER || 'servicio@orasystem.cl',
-      to: process.env.EMAIL_TO || 'comercial@orasystem.cl',
+      from: process.env.EMAIL_USER,
+      to: process.env.EMAIL_TO,
       subject: 'Nueva Solicitud de Consultoría - Formulario Web',
       html: htmlTemplate
     };
