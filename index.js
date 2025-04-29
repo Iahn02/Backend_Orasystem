@@ -4,7 +4,8 @@ const nodemailer = require('nodemailer');
 const sql = require('mssql');
 
 const app = express();
-const PORT = 3001;
+// Puerto para Vercel (usa process.env.PORT si está disponible, de lo contrario usa 3001)
+const PORT = process.env.PORT || 3001;
 
 // Debug de variables de entorno (sin mostrar la contraseña completa)
 console.log('=== CONFIGURACIÓN DE ENTORNO ===');
@@ -60,14 +61,15 @@ transporter.verify()
     }
   });
 
-// Verificar conexión a la base de datos
-console.log('Intentando conectar a la base de datos...');
-sql.connect(dbConfig)
-  .then(() => {
+// Función para conectar a la base de datos con manejo de errores
+const connectToDatabase = async () => {
+  try {
+    console.log('Intentando conectar a la base de datos...');
+    await sql.connect(dbConfig);
     console.log('✅ Conexión a la base de datos SQL Server establecida correctamente');
     
     // Verificar si existe la tabla y crearla si no existe
-    return sql.query(`
+    return await sql.query(`
       IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Formularios]') AND type in (N'U'))
       BEGIN
         CREATE TABLE [dbo].[Formularios] (
@@ -84,15 +86,24 @@ sql.connect(dbConfig)
         PRINT 'La tabla Formularios ya existe'
       END
     `);
-  })
-  .then(result => {
-    console.log('Resultado de la verificación de tabla:', result);
-  })
-  .catch((error) => {
+  } catch (error) {
     console.error('❌ Error al conectar con la base de datos:');
     console.error(`Tipo de error: ${error.name}`);
     console.error(`Mensaje: ${error.message}`);
     console.error('Este error no detendrá el servidor, pero la funcionalidad de base de datos no estará disponible');
+    return null;
+  }
+};
+
+// Intentar la conexión inicial a la base de datos
+connectToDatabase()
+  .then(result => {
+    if (result) {
+      console.log('Resultado de la verificación de tabla:', result);
+    }
+  })
+  .catch(err => {
+    console.error('Error en la conexión inicial a la base de datos:', err);
   });
 
 // Ruta para el formulario
@@ -163,7 +174,7 @@ app.post('/api/formulario', async (req, res) => {
             box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
           }
           .header {
-            background-color: #0056b3;
+            background-color: #e73c30;
             color: #ffffff;
             padding: 25px;
             text-align: center;
@@ -187,14 +198,14 @@ app.post('/api/formulario', async (req, res) => {
           }
           .label {
             font-weight: 600;
-            color: #0056b3;
+            color: #e73c30;
             margin-bottom: 5px;
             font-size: 16px;
           }
           .value {
             margin: 0;
             font-size: 16px;
-            color: #505050;
+            color: #212121;
           }
           .footer {
             background-color: #f1f1f1;
@@ -202,6 +213,12 @@ app.post('/api/formulario', async (req, res) => {
             text-align: center;
             font-size: 14px;
             color: #666;
+          }
+          .logo {
+            margin-bottom: 15px;
+          }
+          .logo img {
+            max-width: 200px;
           }
         </style>
       </head>
@@ -227,6 +244,7 @@ app.post('/api/formulario', async (req, res) => {
             </div>
           </div>
           <div class="footer">
+            <p>ORASYSTEM - Especialistas en Consultoría & Administración IT</p>
             <p>Este mensaje ha sido generado automáticamente. Por favor, no responda directamente a este correo.</p>
             <p>© ${new Date().getFullYear()} Orasystem. Todos los derechos reservados.</p>
           </div>
@@ -325,7 +343,10 @@ app.get('/', (req, res) => {
 
 // Iniciar el servidor
 const server = app.listen(PORT, () => {
-  console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
+  console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
 }).on('error', (err) => {
   console.error('Error al iniciar el servidor:', err.message);
-}); 
+});
+
+// Exportar la app para Vercel
+module.exports = app; 
