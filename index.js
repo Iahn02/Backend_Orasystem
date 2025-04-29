@@ -34,10 +34,10 @@ app.use(express.static('.')); // Sirve archivos estáticos desde la raíz
 
 // Configuración de la base de datos SQL Server
 const dbConfig = {
-  server: 'seguridad.database.windows.net',
-  database: 'SeguridadBD',
-  user: 'orasystem',
-  password: 'admin123.',
+  server: process.env.DB_SERVER || 'seguridad.database.windows.net',
+  database: process.env.DB_NAME || 'SeguridadBD',
+  user: process.env.DB_USER || 'orasystem',
+  password: process.env.DB_PASSWORD || 'admin123.',
   options: {
     encrypt: true,
     trustServerCertificate: false,
@@ -50,8 +50,8 @@ console.log('Configurando transporte de correo...');
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: 'ithanvera423@gmail.com',
-    pass: 'qyad gaut gybn oolw'
+    user: process.env.EMAIL_USER || 'contacto@orasystem.cl',
+    pass: process.env.EMAIL_PASS || ''
   },
   debug: true // Activar modo debug de nodemailer
 });
@@ -265,8 +265,8 @@ app.post('/api/formulario', async (req, res) => {
     // Configuración del correo
     console.log('Preparando opciones de correo...');
     const mailOptions = {
-      from: 'ithanvera423@gmail.com',
-      to: 'ivera@orasystem.cl',
+      from: process.env.EMAIL_USER || 'servicio@orasystem.cl',
+      to: process.env.EMAIL_TO || 'comercial@orasystem.cl',
       subject: 'Nueva Solicitud de Consultoría - Formulario Web',
       html: htmlTemplate
     };
