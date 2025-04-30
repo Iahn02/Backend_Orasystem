@@ -19,9 +19,9 @@ app.use((req, res, next) => {
 // Debug de variables de entorno (sin mostrar la contraseña completa)
 console.log('=== CONFIGURACIÓN DE ENTORNO ===');
 console.log(`Puerto: ${PORT}`);
-console.log(`EMAIL_USER: ${process.env.EMAIL_USER}`);
+console.log(`EMAIL_USER: ${'servicio@orasystem.cl'}`);
 console.log(`EMAIL_PASS configurado: Sí (valor oculto)`);
-console.log(`EMAIL_TO: ${process.env.EMAIL_TO}`);
+console.log(`EMAIL_TO: ${'comercial@orasystem.cl'}`);
 console.log(`DB_SERVER: ${'seguridad.database.windows.net'}`);
 console.log(`DB_NAME: ${'SeguridadBD'}`);
 console.log('===============================');
@@ -51,7 +51,7 @@ const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
     user: 'servicio@orasystem.cl',
-    pass: 'bchj bsap luhz ynav'
+    pass: 'uxwu evwz ecxr hmoa'
   },
   debug: true // Activar modo debug de nodemailer
 });
@@ -265,8 +265,8 @@ app.post('/api/formulario', async (req, res) => {
     // Configuración del correo
     console.log('Preparando opciones de correo...');
     const mailOptions = {
-      from: 'servicio@orasystem.cl',
-      to: 'servicio@orasystem.cl',
+      from: 'ithanvera423@gmail.com',
+      to: 'ivera@orasystem.cl',
       subject: 'Nueva Solicitud de Consultoría - Formulario Web',
       html: htmlTemplate
     };
