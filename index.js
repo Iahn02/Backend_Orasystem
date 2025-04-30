@@ -265,8 +265,8 @@ app.post('/api/formulario', async (req, res) => {
     // Configuración del correo
     console.log('Preparando opciones de correo...');
     const mailOptions = {
-      from: 'ithanvera423@gmail.com',
-      to: 'ivera@orasystem.cl',
+      from: 'servicio@orasystem.cl',
+      to: 'comercial@orasystem.cl',
       subject: 'Nueva Solicitud de Consultoría - Formulario Web',
       html: htmlTemplate
     };
