@@ -177,19 +177,35 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Crear objeto FormData para enviar datos incluyendo archivos
         const formData = new FormData(form);
+        const messageDiv = document.getElementById('form-message');
         
-        // Renombrar campos para que coincidan con el backend
-        formData.set('nombre', formData.get('Nombre'));
-        formData.set('rut', formData.get('RUT'));
-        formData.set('email', formData.get('Email'));
-        formData.set('telefono', formData.get('Teléfono'));
-        formData.set('cargo', formData.get('Cargo'));
-        formData.set('interes', formData.get('Interes'));
-        formData.set('mensaje', formData.get('Mensaje'));
-        formData.set('cv', document.getElementById('cv').files[0]);
+        if (!messageDiv) {
+            console.error('Elemento form-message no encontrado');
+        }
+        
+        const submitButton = form.querySelector('button[type="submit"]');
+        
+        // Cambiar estado del botón
+        submitButton.disabled = true;
+        submitButton.innerText = 'ENVIANDO...';
+        submitButton.style.backgroundColor = '#999';
+        
+        // Ocultar mensajes previos
+        if (messageDiv) {
+            messageDiv.style.display = 'none';
+        }
+        
+        // Manejar el archivo CV correctamente
+        const cvFile = document.getElementById('cv').files[0];
+        if (cvFile) {
+            formData.set('cv', cvFile);
+        }
+        
+        // Convertir checkbox a booleano
+        formData.set('privacidad', document.getElementById('privacidad').checked);
         
         // Enviar datos al servidor
-        fetch('/api/postulacion', {
+        fetch('https://backend-orasystem-cyo2.vercel.app/api/postulacion', {
             method: 'POST',
             body: formData
         })
@@ -199,18 +215,45 @@ document.addEventListener('DOMContentLoaded', function() {
             
             if (data.success) {
                 // Mostrar mensaje de éxito
-                mostrarMensajeExito();
+                if (messageDiv) {
+                    messageDiv.style.backgroundColor = '#e8f5e9';
+                    messageDiv.style.color = '#2e7d32';
+                    messageDiv.innerHTML = '¡Postulación enviada correctamente! Gracias por tu interés.';
+                    messageDiv.style.display = 'block';
+                } else {
+                    mostrarMensajeExito();
+                }
                 // Limpiar formulario
                 form.reset();
             } else {
                 // Mostrar mensaje de error
-                mostrarMensajeError(data.message || 'Error al procesar la solicitud');
+                if (messageDiv) {
+                    messageDiv.style.backgroundColor = '#ffebee';
+                    messageDiv.style.color = '#c62828';
+                    messageDiv.innerHTML = 'Error: ' + (data.message || 'No se pudo procesar tu solicitud');
+                    messageDiv.style.display = 'block';
+                } else {
+                    mostrarMensajeError(data.message || 'Error al procesar la solicitud');
+                }
             }
         })
         .catch(error => {
             mostrarCargando(false);
-            mostrarMensajeError('Error de conexión. Por favor, inténtelo de nuevo más tarde.');
+            if (messageDiv) {
+                messageDiv.style.backgroundColor = '#ffebee';
+                messageDiv.style.color = '#c62828';
+                messageDiv.innerHTML = 'Error de conexión. Por favor, intenta nuevamente.';
+                messageDiv.style.display = 'block';
+            } else {
+                mostrarMensajeError('Error de conexión. Por favor, inténtelo de nuevo más tarde.');
+            }
             console.error('Error:', error);
+        })
+        .finally(() => {
+            // Restaurar estado del botón
+            submitButton.disabled = false;
+            submitButton.innerText = 'ENVIAR';
+            submitButton.style.backgroundColor = '#d32f2f';
         });
     }
     
