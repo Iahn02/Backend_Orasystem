@@ -408,7 +408,7 @@ app.post('/api/postulacion', upload.single('cv'), async (req, res) => {
   console.log('Datos recibidos:', JSON.stringify(req.body, null, 2));
   
   try {
-    const { nombre, rut, email, telefono, cargo, interes, mensaje } = req.body;
+    const { nombre, rut, email, telefono, cargo, interes, mensaje, privacidad } = req.body;
     
     // Validación básica
     if (!nombre || !rut || !email || !cargo || !interes) {
