@@ -19,6 +19,21 @@ app.use((req, res, next) => {
   next();
 });
 
+// Middleware para manejar solicitudes OPTIONS (CORS preflight)
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  
+  // Intercept OPTIONS method
+  if (req.method === 'OPTIONS') {
+    console.log('Recibida solicitud OPTIONS (CORS preflight)');
+    return res.status(200).end();
+  }
+  
+  return next();
+});
+
 // Configuración para subir archivos
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -56,6 +71,29 @@ const upload = multer({
   fileFilter: fileFilter
 }).single('cv');
 
+// Función auxiliar para manejar la carga de archivos con mejor manejo de errores
+const handleUpload = (req, res) => {
+  return new Promise((resolve, reject) => {
+    upload(req, res, (err) => {
+      if (err) {
+        if (err instanceof multer.MulterError) {
+          // Error de Multer durante la carga
+          console.error('❌ Error de Multer:', err.message);
+          if (err.code === 'LIMIT_FILE_SIZE') {
+            return reject({ status: 400, message: 'El archivo excede el límite de 5MB' });
+          }
+          return reject({ status: 400, message: 'Error al subir el archivo: ' + err.message });
+        } else {
+          // Otro tipo de error
+          console.error('❌ Error al procesar la solicitud:', err.message);
+          return reject({ status: 400, message: 'Error al procesar la solicitud: ' + err.message });
+        }
+      }
+      resolve();
+    });
+  });
+};
+
 // Debug de variables de entorno (sin mostrar la contraseña completa)
 console.log('=== CONFIGURACIÓN DE ENTORNO ===');
 console.log(`Puerto: ${PORT}`);
@@ -67,11 +105,20 @@ console.log(`DB_NAME: ${'SeguridadBD'}`);
 console.log('===============================');
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: '*', // Permite solicitudes desde cualquier origen
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  credentials: true,
+  maxAge: 86400 // 24 horas en segundos
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('.')); // Sirve archivos estáticos desde la raíz
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Añadir middleware específico para CORS preflight
+app.options('*', cors());
 
 // Configuración de la base de datos SQL Server
 const dbConfig = {
@@ -413,315 +460,326 @@ app.get('/registros', (req, res) => {
 });
 
 // Ruta para el formulario de "Trabaja con Nosotros"
-app.post('/api/postulacion', function(req, res) {
-  upload(req, res, async function(err) {
-    if (err instanceof multer.MulterError) {
-      // Error de Multer durante la carga
-      console.error('❌ Error de Multer:', err.message);
-      return res.status(400).json({
-        success: false,
-        message: err.code === 'LIMIT_FILE_SIZE' 
-          ? 'El archivo excede el límite de 5MB' 
-          : 'Error al subir el archivo: ' + err.message
+app.post('/api/postulacion', cors(), async function(req, res) {
+  // Establecer encabezados CORS explícitamente
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  
+  // Si es una solicitud OPTIONS, responder inmediatamente
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  
+  // Manejar la carga del archivo
+  try {
+    // Manejar la subida del archivo
+    await new Promise((resolve, reject) => {
+      upload(req, res, (err) => {
+        if (err) {
+          if (err instanceof multer.MulterError) {
+            // Error de Multer durante la carga
+            console.error('❌ Error de Multer:', err.message);
+            if (err.code === 'LIMIT_FILE_SIZE') {
+              reject(new Error('El archivo excede el límite de 5MB'));
+            } else {
+              reject(new Error('Error al subir el archivo: ' + err.message));
+            }
+          } else {
+            // Otro tipo de error
+            console.error('❌ Error al procesar la solicitud:', err.message);
+            reject(new Error('Error al procesar la solicitud: ' + err.message));
+          }
+        } else {
+          resolve();
+        }
       });
-    } else if (err) {
-      // Otro tipo de error
-      console.error('❌ Error al procesar la solicitud:', err.message);
-      return res.status(400).json({
-        success: false,
-        message: 'Error al procesar la solicitud: ' + err.message
-      });
-    }
+    });
     
-    // Si llegamos aquí, no hubo errores con el archivo
     console.log('📨 Recibida petición POST a /api/postulacion');
     console.log('Datos recibidos:', JSON.stringify(req.body, null, 2));
     
-    try {
-      const { nombre, rut, email, telefono, cargo, interes, mensaje, privacidad } = req.body;
-      
-      // Validación básica
-      if (!nombre || !rut || !email || !cargo || !interes) {
-        console.log('❌ Validación fallida: Datos incompletos');
-        return res.status(400).json({ 
-          success: false, 
-          message: 'Todos los campos obligatorios son requeridos' 
-        });
-      }
-
-      console.log('✅ Validación de datos correcta');
-      
-      // Información del archivo CV
-      let archivoBase64 = null;
-      let nombreArchivoOriginal = null;
-      let tipoArchivo = null;
-      
-      if (req.file) {
-        // Leer el archivo y convertirlo a base64
-        const fileBuffer = fs.readFileSync(req.file.path);
-        archivoBase64 = fileBuffer.toString('base64');
-        nombreArchivoOriginal = req.file.originalname;
-        tipoArchivo = req.file.mimetype;
-        console.log(`✅ Archivo CV recibido y convertido a base64: ${nombreArchivoOriginal}`);
-        
-        // Eliminar el archivo físico después de convertirlo a base64
-        fs.unlinkSync(req.file.path);
-        console.log(`✅ Archivo físico eliminado: ${req.file.path}`);
-      }
-      
-      // Guardar en la base de datos
-      console.log('Intentando guardar datos en la base de datos...');
-      let insertedId = null;
-      
-      try {
-        // Verificar si la tabla tiene la columna para el archivo base64
-        await sql.connect(dbConfig);
-        
-        // Verificar si existe la columna ArchivoBase64 y agregarla si no existe
-        await sql.query(`
-          IF NOT EXISTS (
-            SELECT * FROM sys.columns 
-            WHERE object_id = OBJECT_ID(N'[dbo].[Postulaciones]') AND name = 'ArchivoBase64'
-          )
-          BEGIN
-            ALTER TABLE [dbo].[Postulaciones] ADD [ArchivoBase64] NVARCHAR(MAX) NULL;
-            ALTER TABLE [dbo].[Postulaciones] ADD [TipoArchivo] NVARCHAR(100) NULL;
-            PRINT 'Columnas ArchivoBase64 y TipoArchivo agregadas correctamente'
-          END
-          ELSE
-          BEGIN
-            PRINT 'Las columnas ArchivoBase64 y TipoArchivo ya existen'
-          END
-        `);
-        
-        const pool = await sql.connect(dbConfig);
-        const result = await pool.request()
-          .input('nombre', sql.NVarChar, nombre)
-          .input('rut', sql.NVarChar, rut)
-          .input('email', sql.NVarChar, email)
-          .input('telefono', sql.NVarChar, telefono || null)
-          .input('cargo', sql.NVarChar, cargo)
-          .input('interes', sql.NVarChar, interes)
-          .input('mensaje', sql.NVarChar, mensaje || null)
-          .input('archivoBase64', sql.NVarChar, archivoBase64)
-          .input('nombreArchivoOriginal', sql.NVarChar, nombreArchivoOriginal)
-          .input('tipoArchivo', sql.NVarChar, tipoArchivo)
-          .query(`
-            INSERT INTO [dbo].[Postulaciones] 
-              ([Nombre], [RUT], [Email], [Telefono], [Cargo], [Interes], [Mensaje], [ArchivoBase64], [NombreArchivoOriginal], [TipoArchivo]) 
-            VALUES 
-              (@nombre, @rut, @email, @telefono, @cargo, @interes, @mensaje, @archivoBase64, @nombreArchivoOriginal, @tipoArchivo);
-            SELECT SCOPE_IDENTITY() AS id;
-          `);
-        
-        insertedId = result.recordset[0].id;
-        console.log(`✅ Datos guardados correctamente en la base de datos con ID: ${insertedId}`);
-      } catch (dbError) {
-        console.error('❌ Error al guardar en la base de datos:');
-        console.error(`Mensaje: ${dbError.message}`);
-        console.error('Continuando con el envío de correo...');
-      }
-      
-      // Plantilla HTML para el correo
-      const htmlTemplate = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <style>
-            body {
-              font-family: 'Segoe UI', Arial, sans-serif;
-              line-height: 1.6;
-              color: #333;
-              background-color: #f9f9f9;
-              margin: 0;
-              padding: 0;
-            }
-            .container {
-              max-width: 650px;
-              margin: 0 auto;
-              background-color: #ffffff;
-              border-radius: 8px;
-              overflow: hidden;
-              box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
-            }
-            .header {
-              background-color: #e73c30;
-              color: #ffffff;
-              padding: 25px;
-              text-align: center;
-            }
-            .header h1 {
-              margin: 0;
-              font-size: 24px;
-              font-weight: 600;
-            }
-            .content {
-              padding: 30px;
-            }
-            .field {
-              margin-bottom: 25px;
-              border-bottom: 1px solid #eee;
-              padding-bottom: 15px;
-            }
-            .field:last-child {
-              border-bottom: none;
-              margin-bottom: 0;
-            }
-            .label {
-              font-weight: 600;
-              color: #e73c30;
-              margin-bottom: 5px;
-              font-size: 16px;
-            }
-            .value {
-              margin: 0;
-              font-size: 16px;
-              color: #212121;
-            }
-            .footer {
-              background-color: #f1f1f1;
-              padding: 15px;
-              text-align: center;
-              font-size: 14px;
-              color: #666;
-            }
-            .logo {
-              margin-bottom: 15px;
-            }
-            .logo img {
-              max-width: 200px;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <div class="header">
-              <h1>Nueva Postulación Laboral</h1>
-            </div>
-            <div class="content">
-              <p>Se ha recibido una nueva postulación laboral a través del formulario "Trabaja con Nosotros" del sitio web corporativo.</p>
-              
-              <div class="field">
-                <p class="label">Nombre completo:</p>
-                <p class="value">${nombre}</p>
-              </div>
-              <div class="field">
-                <p class="label">RUT:</p>
-                <p class="value">${rut}</p>
-              </div>
-              <div class="field">
-                <p class="label">Correo electrónico:</p>
-                <p class="value">${email}</p>
-              </div>
-              ${telefono ? `
-              <div class="field">
-                <p class="label">Teléfono:</p>
-                <p class="value">${telefono}</p>
-              </div>
-              ` : ''}
-              <div class="field">
-                <p class="label">Cargo al que postula:</p>
-                <p class="value">${cargo}</p>
-              </div>
-              <div class="field">
-                <p class="label">Interés en Orasystem:</p>
-                <p class="value">${interes}</p>
-              </div>
-              ${mensaje ? `
-              <div class="field">
-                <p class="label">Mensaje adicional:</p>
-                <p class="value">${mensaje}</p>
-              </div>
-              ` : ''}
-              ${nombreArchivoOriginal ? `
-              <div class="field">
-                <p class="label">CV adjunto:</p>
-                <p class="value">${nombreArchivoOriginal}</p>
-              </div>
-              ` : `
-              <div class="field">
-                <p class="label">CV adjunto:</p>
-                <p class="value">No se adjuntó CV</p>
-              </div>
-              `}
-            </div>
-            <div class="footer">
-              <p>ORASYSTEM - Especialistas en Consultoría & Administración IT</p>
-              <p>Este mensaje ha sido generado automáticamente. Por favor, no responda directamente a este correo.</p>
-              <p>© ${new Date().getFullYear()} Orasystem. Todos los derechos reservados.</p>
-            </div>
-          </div>
-        </body>
-        </html>
-      `;
-
-      // Configuración del correo
-      console.log('Preparando opciones de correo...');
-      const mailOptions = {
-        from: 'servicio@orasystem.cl',
-        to: 'rrhh@orasystem.cl',
-        subject: 'Nueva Postulación Laboral - Trabaja con Nosotros',
-        html: htmlTemplate
-      };
-      
-      // Adjuntar CV si existe
-      if (archivoBase64 && nombreArchivoOriginal) {
-        mailOptions.attachments = [
-          {
-            filename: nombreArchivoOriginal,
-            content: archivoBase64,
-            encoding: 'base64'
-          }
-        ];
-        console.log(`✅ CV adjuntado al correo: ${nombreArchivoOriginal}`);
-      }
-      
-      console.log(`De: ${mailOptions.from}`);
-      console.log(`Para: ${mailOptions.to}`);
-      console.log(`Asunto: ${mailOptions.subject}`);
-      console.log('Intentando enviar correo...');
-
-      // Enviar el correo
-      const info = await transporter.sendMail(mailOptions);
-      console.log('✅ Correo enviado correctamente');
-      console.log('ID del mensaje:', info.messageId);
-      console.log('Respuesta del servidor:', info.response);
-
-      res.status(200).json({ 
-        success: true, 
-        message: 'Postulación enviada correctamente' 
-      });
-    } catch (error) {
-      console.error('❌ Error al enviar la postulación:');
-      console.error(`Tipo de error: ${error.name}`);
-      console.error(`Mensaje: ${error.message}`);
-      
-      if (error.code) {
-        console.error(`Código: ${error.code}`);
-      }
-      
-      if (error.response) {
-        console.error(`Respuesta del servidor: ${error.response}`);
-      }
-      
-      if (error.stack) {
-        console.error('Stack de error:');
-        console.error(error.stack);
-      }
-
-      res.status(500).json({ 
+    // Validar los datos del formulario
+    const { nombre, rut, email, telefono, cargo, interes, mensaje, privacidad } = req.body;
+    
+    if (!nombre || !rut || !email || !cargo || !interes) {
+      console.log('❌ Validación fallida: Datos incompletos');
+      return res.status(400).json({ 
         success: false, 
-        message: 'Error al procesar la postulación',
-        error: error.message
+        message: 'Todos los campos obligatorios son requeridos' 
       });
     }
-  });
+    
+    console.log('✅ Validación de datos correcta');
+    
+    // Procesar el archivo
+    let archivoBase64 = null;
+    let nombreArchivoOriginal = null;
+    let tipoArchivo = null;
+    
+    if (req.file) {
+      // Leer el archivo y convertirlo a base64
+      const fileBuffer = fs.readFileSync(req.file.path);
+      archivoBase64 = fileBuffer.toString('base64');
+      nombreArchivoOriginal = req.file.originalname;
+      tipoArchivo = req.file.mimetype;
+      console.log(`✅ Archivo CV recibido y convertido a base64: ${nombreArchivoOriginal}`);
+      
+      // Eliminar el archivo físico después de convertirlo a base64
+      fs.unlinkSync(req.file.path);
+      console.log(`✅ Archivo físico eliminado: ${req.file.path}`);
+    }
+    
+    // Guardar en la base de datos
+    console.log('Intentando guardar datos en la base de datos...');
+    let insertedId = null;
+    
+    try {
+      // Verificar si la tabla tiene la columna para el archivo base64
+      await sql.connect(dbConfig);
+      
+      // Verificar si existe la columna ArchivoBase64 y agregarla si no existe
+      await sql.query(`
+        IF NOT EXISTS (
+          SELECT * FROM sys.columns 
+          WHERE object_id = OBJECT_ID(N'[dbo].[Postulaciones]') AND name = 'ArchivoBase64'
+        )
+        BEGIN
+          ALTER TABLE [dbo].[Postulaciones] ADD [ArchivoBase64] NVARCHAR(MAX) NULL;
+          ALTER TABLE [dbo].[Postulaciones] ADD [TipoArchivo] NVARCHAR(100) NULL;
+          PRINT 'Columnas ArchivoBase64 y TipoArchivo agregadas correctamente'
+        END
+        ELSE
+        BEGIN
+          PRINT 'Las columnas ArchivoBase64 y TipoArchivo ya existen'
+        END
+      `);
+      
+      const pool = await sql.connect(dbConfig);
+      const result = await pool.request()
+        .input('nombre', sql.NVarChar, nombre)
+        .input('rut', sql.NVarChar, rut)
+        .input('email', sql.NVarChar, email)
+        .input('telefono', sql.NVarChar, telefono || null)
+        .input('cargo', sql.NVarChar, cargo)
+        .input('interes', sql.NVarChar, interes)
+        .input('mensaje', sql.NVarChar, mensaje || null)
+        .input('archivoBase64', sql.NVarChar, archivoBase64)
+        .input('nombreArchivoOriginal', sql.NVarChar, nombreArchivoOriginal)
+        .input('tipoArchivo', sql.NVarChar, tipoArchivo)
+        .query(`
+          INSERT INTO [dbo].[Postulaciones] 
+            ([Nombre], [RUT], [Email], [Telefono], [Cargo], [Interes], [Mensaje], [ArchivoBase64], [NombreArchivoOriginal], [TipoArchivo]) 
+          VALUES 
+            (@nombre, @rut, @email, @telefono, @cargo, @interes, @mensaje, @archivoBase64, @nombreArchivoOriginal, @tipoArchivo);
+          SELECT SCOPE_IDENTITY() AS id;
+        `);
+      
+      insertedId = result.recordset[0].id;
+      console.log(`✅ Datos guardados correctamente en la base de datos con ID: ${insertedId}`);
+    } catch (dbError) {
+      console.error('❌ Error al guardar en la base de datos:');
+      console.error(`Mensaje: ${dbError.message}`);
+      console.error('Continuando con el envío de correo...');
+    }
+    
+    // Plantilla HTML para el correo
+    const htmlTemplate = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+          body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f9f9f9;
+            margin: 0;
+            padding: 0;
+          }
+          .container {
+            max-width: 650px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+          }
+          .header {
+            background-color: #e73c30;
+            color: #ffffff;
+            padding: 25px;
+            text-align: center;
+          }
+          .header h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 600;
+          }
+          .content {
+            padding: 30px;
+          }
+          .field {
+            margin-bottom: 25px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 15px;
+          }
+          .field:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+          }
+          .label {
+            font-weight: 600;
+            color: #e73c30;
+            margin-bottom: 5px;
+            font-size: 16px;
+          }
+          .value {
+            margin: 0;
+            font-size: 16px;
+            color: #212121;
+          }
+          .footer {
+            background-color: #f1f1f1;
+            padding: 15px;
+            text-align: center;
+            font-size: 14px;
+            color: #666;
+          }
+          .logo {
+            margin-bottom: 15px;
+          }
+          .logo img {
+            max-width: 200px;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>Nueva Postulación Laboral</h1>
+          </div>
+          <div class="content">
+            <p>Se ha recibido una nueva postulación laboral a través del formulario "Trabaja con Nosotros" del sitio web corporativo.</p>
+            
+            <div class="field">
+              <p class="label">Nombre completo:</p>
+              <p class="value">${nombre}</p>
+            </div>
+            <div class="field">
+              <p class="label">RUT:</p>
+              <p class="value">${rut}</p>
+            </div>
+            <div class="field">
+              <p class="label">Correo electrónico:</p>
+              <p class="value">${email}</p>
+            </div>
+            ${telefono ? `
+            <div class="field">
+              <p class="label">Teléfono:</p>
+              <p class="value">${telefono}</p>
+            </div>
+            ` : ''}
+            <div class="field">
+              <p class="label">Cargo al que postula:</p>
+              <p class="value">${cargo}</p>
+            </div>
+            <div class="field">
+              <p class="label">Interés en Orasystem:</p>
+              <p class="value">${interes}</p>
+            </div>
+            ${mensaje ? `
+            <div class="field">
+              <p class="label">Mensaje adicional:</p>
+              <p class="value">${mensaje}</p>
+            </div>
+            ` : ''}
+            ${nombreArchivoOriginal ? `
+            <div class="field">
+              <p class="label">CV adjunto:</p>
+              <p class="value">${nombreArchivoOriginal}</p>
+            </div>
+            ` : `
+            <div class="field">
+              <p class="label">CV adjunto:</p>
+              <p class="value">No se adjuntó CV</p>
+            </div>
+            `}
+          </div>
+          <div class="footer">
+            <p>ORASYSTEM - Especialistas en Consultoría & Administración IT</p>
+            <p>Este mensaje ha sido generado automáticamente. Por favor, no responda directamente a este correo.</p>
+            <p>© ${new Date().getFullYear()} Orasystem. Todos los derechos reservados.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    // Configuración del correo
+    console.log('Preparando opciones de correo...');
+    const mailOptions = {
+      from: 'servicio@orasystem.cl',
+      to: 'rrhh@orasystem.cl',
+      subject: 'Nueva Postulación Laboral - Trabaja con Nosotros',
+      html: htmlTemplate
+    };
+    
+    // Adjuntar CV si existe
+    if (archivoBase64 && nombreArchivoOriginal) {
+      mailOptions.attachments = [
+        {
+          filename: nombreArchivoOriginal,
+          content: archivoBase64,
+          encoding: 'base64'
+        }
+      ];
+      console.log(`✅ CV adjuntado al correo: ${nombreArchivoOriginal}`);
+    }
+    
+    console.log(`De: ${mailOptions.from}`);
+    console.log(`Para: ${mailOptions.to}`);
+    console.log(`Asunto: ${mailOptions.subject}`);
+    console.log('Intentando enviar correo...');
+
+    // Enviar el correo
+    const info = await transporter.sendMail(mailOptions);
+    console.log('✅ Correo enviado correctamente');
+    console.log('ID del mensaje:', info.messageId);
+    console.log('Respuesta del servidor:', info.response);
+
+    // Enviar respuesta exitosa
+    res.status(200).json({ 
+      success: true, 
+      message: 'Postulación enviada correctamente' 
+    });
+    
+  } catch (error) {
+    // Manejar cualquier error durante el proceso
+    console.error('❌ Error al procesar la postulación:');
+    console.error(`Mensaje: ${error.message}`);
+    
+    if (error.stack) {
+      console.error('Stack de error:');
+      console.error(error.stack);
+    }
+    
+    return res.status(400).json({
+      success: false,
+      message: 'Error al procesar la postulación: ' + error.message
+    });
+  }
 });
 
 // Ruta para obtener las postulaciones
-app.get('/api/postulaciones', async (req, res) => {
+app.get('/api/postulaciones', cors(), async (req, res) => {
+  // Establecer encabezados CORS explícitamente
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  
   console.log('📥 Recibida petición GET a /api/postulaciones');
   
   try {
@@ -748,7 +806,12 @@ app.get('/api/postulaciones', async (req, res) => {
 });
 
 // Ruta para obtener el CV de una postulación específica
-app.get('/api/postulacion/:id/cv', async (req, res) => {
+app.get('/api/postulacion/:id/cv', cors(), async (req, res) => {
+  // Establecer encabezados CORS explícitamente
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  
   console.log(`📥 Recibida petición GET a /api/postulacion/${req.params.id}/cv`);
   
   try {
@@ -806,7 +869,12 @@ app.get('/api/postulacion/:id/cv', async (req, res) => {
 });
 
 // Ruta para obtener información básica de una postulación específica
-app.get('/api/postulacion/:id', async (req, res) => {
+app.get('/api/postulacion/:id', cors(), async (req, res) => {
+  // Establecer encabezados CORS explícitamente
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  
   console.log(`📥 Recibida petición GET a /api/postulacion/${req.params.id}`);
   
   try {
