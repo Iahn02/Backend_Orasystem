@@ -37,28 +37,34 @@ app.use((req, res, next) => {
 // Configuración para subir archivos
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    const uploadDir = path.join(__dirname, 'uploads');
+    // En Vercel, necesitamos usar /tmp para almacenamiento temporal
+    const uploadDir = process.env.VERCEL ? '/tmp' : path.join(__dirname, 'uploads');
     // Crear directorio si no existe
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
+    console.log(`Directorio para subida de archivos: ${uploadDir}`);
     cb(null, uploadDir);
   },
   filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     // Asegurar que el nombre de archivo no contiene caracteres especiales
     const safeOriginalname = file.originalname.replace(/[^a-zA-Z0-9.]/g, '_');
-    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(safeOriginalname));
+    const filename = file.fieldname + '-' + uniqueSuffix + path.extname(safeOriginalname);
+    console.log(`Guardando archivo como: ${filename}`);
+    cb(null, filename);
   }
 });
 
 // Función para filtrar archivos
 const fileFilter = function (req, file, cb) {
+  console.log(`Archivo recibido: ${file.originalname}, tipo: ${file.mimetype}`);
   // Aceptar solo archivos PDF
   if (file.mimetype === 'application/pdf') {
     cb(null, true);
   } else {
-    cb(new Error('Solo se permiten archivos PDF'), false);
+    console.log(`Tipo de archivo rechazado: ${file.mimetype}`);
+    cb(new Error(`Solo se permiten archivos PDF. Tipo recibido: ${file.mimetype}`), false);
   }
 };
 
@@ -76,9 +82,10 @@ const handleUpload = (req, res) => {
   return new Promise((resolve, reject) => {
     upload(req, res, (err) => {
       if (err) {
+        console.error('❌ Error en handleUpload:', err);
         if (err instanceof multer.MulterError) {
           // Error de Multer durante la carga
-          console.error('❌ Error de Multer:', err.message);
+          console.error('❌ Error de Multer:', err.message, err.code);
           if (err.code === 'LIMIT_FILE_SIZE') {
             return reject({ status: 400, message: 'El archivo excede el límite de 5MB' });
           }
@@ -88,6 +95,11 @@ const handleUpload = (req, res) => {
           console.error('❌ Error al procesar la solicitud:', err.message);
           return reject({ status: 400, message: 'Error al procesar la solicitud: ' + err.message });
         }
+      }
+      if (req.file) {
+        console.log(`✅ Archivo recibido correctamente: ${req.file.originalname} (${req.file.size} bytes)`);
+      } else {
+        console.log('ℹ️ No se recibió ningún archivo');
       }
       resolve();
     });
@@ -471,32 +483,15 @@ app.post('/api/postulacion', cors(), async function(req, res) {
     return res.status(200).end();
   }
   
+  console.log('📨 Recibida petición POST a /api/postulacion');
+  console.log('Encabezados:', JSON.stringify(req.headers));
+  console.log('Content-Type:', req.headers['content-type']);
+  
   // Manejar la carga del archivo
   try {
     // Manejar la subida del archivo
-    await new Promise((resolve, reject) => {
-      upload(req, res, (err) => {
-        if (err) {
-          if (err instanceof multer.MulterError) {
-            // Error de Multer durante la carga
-            console.error('❌ Error de Multer:', err.message);
-            if (err.code === 'LIMIT_FILE_SIZE') {
-              reject(new Error('El archivo excede el límite de 5MB'));
-            } else {
-              reject(new Error('Error al subir el archivo: ' + err.message));
-            }
-          } else {
-            // Otro tipo de error
-            console.error('❌ Error al procesar la solicitud:', err.message);
-            reject(new Error('Error al procesar la solicitud: ' + err.message));
-          }
-        } else {
-          resolve();
-        }
-      });
-    });
+    await handleUpload(req, res);
     
-    console.log('📨 Recibida petición POST a /api/postulacion');
     console.log('Datos recibidos:', JSON.stringify(req.body, null, 2));
     
     // Validar los datos del formulario
@@ -518,16 +513,23 @@ app.post('/api/postulacion', cors(), async function(req, res) {
     let tipoArchivo = null;
     
     if (req.file) {
-      // Leer el archivo y convertirlo a base64
-      const fileBuffer = fs.readFileSync(req.file.path);
-      archivoBase64 = fileBuffer.toString('base64');
-      nombreArchivoOriginal = req.file.originalname;
-      tipoArchivo = req.file.mimetype;
-      console.log(`✅ Archivo CV recibido y convertido a base64: ${nombreArchivoOriginal}`);
-      
-      // Eliminar el archivo físico después de convertirlo a base64
-      fs.unlinkSync(req.file.path);
-      console.log(`✅ Archivo físico eliminado: ${req.file.path}`);
+      try {
+        // Leer el archivo y convertirlo a base64
+        const fileBuffer = fs.readFileSync(req.file.path);
+        archivoBase64 = fileBuffer.toString('base64');
+        nombreArchivoOriginal = req.file.originalname;
+        tipoArchivo = req.file.mimetype;
+        console.log(`✅ Archivo CV recibido y convertido a base64: ${nombreArchivoOriginal} (${fileBuffer.length} bytes)`);
+        
+        // Eliminar el archivo físico después de convertirlo a base64
+        fs.unlinkSync(req.file.path);
+        console.log(`✅ Archivo físico eliminado: ${req.file.path}`);
+      } catch (fileError) {
+        console.error('❌ Error al procesar el archivo:', fileError);
+        // Continuamos con el proceso aunque haya error con el archivo
+      }
+    } else {
+      console.log('⚠️ No se recibió archivo CV');
     }
     
     // Guardar en la base de datos
