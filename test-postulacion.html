@@ -87,8 +87,9 @@
     </style>
 </head>
 <body>
-    <h1>Prueba de Postulación API</h1>
-    <p>Este formulario envía una solicitud POST a <code>https://backend-orasystem-cyo2.vercel.app/api/postulacion</code></p>
+    <h1>Prueba de Postulación API (Almacenamiento Base64)</h1>
+    <p>Este formulario envía una solicitud POST a <code>http://localhost:3001/api/postulacion</code></p>
+    <p>El archivo PDF adjuntado se convertirá a base64 y se almacenará en la base de datos</p>
 
     <form id="test-form">
         <div class="form-group">
@@ -210,7 +211,7 @@
             submitButton.innerText = 'Enviando...';
             
             // Realizar la solicitud
-            fetch('https://backend-orasystem-cyo2.vercel.app/api/postulacion', {
+            fetch('http://localhost:3001/api/postulacion', {
                 method: 'POST',
                 body: formData
             })

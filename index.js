@@ -452,13 +452,21 @@ app.post('/api/postulacion', function(req, res) {
       console.log('✅ Validación de datos correcta');
       
       // Información del archivo CV
-      let rutaCV = null;
+      let archivoBase64 = null;
       let nombreArchivoOriginal = null;
+      let tipoArchivo = null;
       
       if (req.file) {
-        rutaCV = req.file.path;
+        // Leer el archivo y convertirlo a base64
+        const fileBuffer = fs.readFileSync(req.file.path);
+        archivoBase64 = fileBuffer.toString('base64');
         nombreArchivoOriginal = req.file.originalname;
-        console.log(`✅ Archivo CV recibido: ${nombreArchivoOriginal}`);
+        tipoArchivo = req.file.mimetype;
+        console.log(`✅ Archivo CV recibido y convertido a base64: ${nombreArchivoOriginal}`);
+        
+        // Eliminar el archivo físico después de convertirlo a base64
+        fs.unlinkSync(req.file.path);
+        console.log(`✅ Archivo físico eliminado: ${req.file.path}`);
       }
       
       // Guardar en la base de datos
@@ -466,6 +474,26 @@ app.post('/api/postulacion', function(req, res) {
       let insertedId = null;
       
       try {
+        // Verificar si la tabla tiene la columna para el archivo base64
+        await sql.connect(dbConfig);
+        
+        // Verificar si existe la columna ArchivoBase64 y agregarla si no existe
+        await sql.query(`
+          IF NOT EXISTS (
+            SELECT * FROM sys.columns 
+            WHERE object_id = OBJECT_ID(N'[dbo].[Postulaciones]') AND name = 'ArchivoBase64'
+          )
+          BEGIN
+            ALTER TABLE [dbo].[Postulaciones] ADD [ArchivoBase64] NVARCHAR(MAX) NULL;
+            ALTER TABLE [dbo].[Postulaciones] ADD [TipoArchivo] NVARCHAR(100) NULL;
+            PRINT 'Columnas ArchivoBase64 y TipoArchivo agregadas correctamente'
+          END
+          ELSE
+          BEGIN
+            PRINT 'Las columnas ArchivoBase64 y TipoArchivo ya existen'
+          END
+        `);
+        
         const pool = await sql.connect(dbConfig);
         const result = await pool.request()
           .input('nombre', sql.NVarChar, nombre)
@@ -475,13 +503,14 @@ app.post('/api/postulacion', function(req, res) {
           .input('cargo', sql.NVarChar, cargo)
           .input('interes', sql.NVarChar, interes)
           .input('mensaje', sql.NVarChar, mensaje || null)
-          .input('rutaCV', sql.NVarChar, rutaCV)
+          .input('archivoBase64', sql.NVarChar, archivoBase64)
           .input('nombreArchivoOriginal', sql.NVarChar, nombreArchivoOriginal)
+          .input('tipoArchivo', sql.NVarChar, tipoArchivo)
           .query(`
             INSERT INTO [dbo].[Postulaciones] 
-              ([Nombre], [RUT], [Email], [Telefono], [Cargo], [Interes], [Mensaje], [RutaCV], [NombreArchivoOriginal]) 
+              ([Nombre], [RUT], [Email], [Telefono], [Cargo], [Interes], [Mensaje], [ArchivoBase64], [NombreArchivoOriginal], [TipoArchivo]) 
             VALUES 
-              (@nombre, @rut, @email, @telefono, @cargo, @interes, @mensaje, @rutaCV, @nombreArchivoOriginal);
+              (@nombre, @rut, @email, @telefono, @cargo, @interes, @mensaje, @archivoBase64, @nombreArchivoOriginal, @tipoArchivo);
             SELECT SCOPE_IDENTITY() AS id;
           `);
         
@@ -638,13 +667,15 @@ app.post('/api/postulacion', function(req, res) {
       };
       
       // Adjuntar CV si existe
-      if (req.file) {
+      if (archivoBase64 && nombreArchivoOriginal) {
         mailOptions.attachments = [
           {
-            filename: req.file.originalname,
-            path: req.file.path
+            filename: nombreArchivoOriginal,
+            content: archivoBase64,
+            encoding: 'base64'
           }
         ];
+        console.log(`✅ CV adjuntado al correo: ${nombreArchivoOriginal}`);
       }
       
       console.log(`De: ${mailOptions.from}`);
@@ -711,6 +742,117 @@ app.get('/api/postulaciones', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error al obtener las postulaciones',
+      error: error.message
+    });
+  }
+});
+
+// Ruta para obtener el CV de una postulación específica
+app.get('/api/postulacion/:id/cv', async (req, res) => {
+  console.log(`📥 Recibida petición GET a /api/postulacion/${req.params.id}/cv`);
+  
+  try {
+    const postulacionId = req.params.id;
+    
+    // Validar que el ID sea un número
+    if (!/^\d+$/.test(postulacionId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'El ID de la postulación debe ser un número'
+      });
+    }
+    
+    const pool = await sql.connect(dbConfig);
+    const result = await pool.request()
+      .input('id', sql.Int, postulacionId)
+      .query('SELECT [ArchivoBase64], [NombreArchivoOriginal], [TipoArchivo] FROM [dbo].[Postulaciones] WHERE [Id] = @id');
+    
+    if (result.recordset.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Postulación no encontrada'
+      });
+    }
+    
+    const postulacion = result.recordset[0];
+    
+    if (!postulacion.ArchivoBase64 || !postulacion.NombreArchivoOriginal) {
+      return res.status(404).json({
+        success: false,
+        message: 'Esta postulación no tiene CV adjunto'
+      });
+    }
+    
+    console.log(`✅ CV encontrado para la postulación ID ${postulacionId}: ${postulacion.NombreArchivoOriginal}`);
+    
+    // Configurar cabeceras para la descarga del archivo
+    res.setHeader('Content-Type', postulacion.TipoArchivo || 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${postulacion.NombreArchivoOriginal}"`);
+    
+    // Decodificar y enviar el archivo
+    const buffer = Buffer.from(postulacion.ArchivoBase64, 'base64');
+    res.end(buffer);
+    
+  } catch (error) {
+    console.error('❌ Error al obtener el CV:');
+    console.error(`Mensaje: ${error.message}`);
+    
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener el CV',
+      error: error.message
+    });
+  }
+});
+
+// Ruta para obtener información básica de una postulación específica
+app.get('/api/postulacion/:id', async (req, res) => {
+  console.log(`📥 Recibida petición GET a /api/postulacion/${req.params.id}`);
+  
+  try {
+    const postulacionId = req.params.id;
+    
+    // Validar que el ID sea un número
+    if (!/^\d+$/.test(postulacionId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'El ID de la postulación debe ser un número'
+      });
+    }
+    
+    const pool = await sql.connect(dbConfig);
+    const result = await pool.request()
+      .input('id', sql.Int, postulacionId)
+      .query(`
+        SELECT 
+          [Id], [Nombre], [RUT], [Email], [Telefono], [Cargo], 
+          [Interes], [Mensaje], [NombreArchivoOriginal], [FechaRegistro], 
+          CASE WHEN [ArchivoBase64] IS NULL THEN 0 ELSE 1 END AS [TieneCV]
+        FROM [dbo].[Postulaciones] 
+        WHERE [Id] = @id
+      `);
+    
+    if (result.recordset.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Postulación no encontrada'
+      });
+    }
+    
+    console.log(`✅ Información encontrada para la postulación ID ${postulacionId}`);
+    
+    res.status(200).json({
+      success: true,
+      data: result.recordset[0]
+    });
+    
+  } catch (error) {
+    console.error('❌ Error al obtener la información de la postulación:');
+    console.error(`Mensaje: ${error.message}`);
+    
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener la información de la postulación',
       error: error.message
     });
   }
